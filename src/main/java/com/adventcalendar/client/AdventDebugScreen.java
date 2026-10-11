@@ -120,17 +120,19 @@ public class AdventDebugScreen extends AbstractCalendarScreen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.render(graphics, mouseX, mouseY, partialTick);
-        int centerX = this.width / 2;
-        int y = this.height - 8;
-        graphics.drawString(this.font, Component.translatable("adventcalendar.debug.calendar",
-                state.year(), state.unlockedThrough()), centerX - 130, y - 6, GuiTextures.TEXT_DIM, false);
-        Component hint = Component.translatable("adventcalendar.debug.hint");
-        graphics.drawString(this.font, hint, centerX - 130, y - 16, GuiTextures.TEXT_DIM, false);
-        // live status of the toggles
-        graphics.drawString(this.font, Component.translatable("adventcalendar.debug.preview",
-                state.isPreview() ? "ON" : "OFF"), centerX + 40, y - 16, GuiTextures.GOLD, false);
-        graphics.drawString(this.font, Component.translatable("adventcalendar.debug.simulate",
-                state.isSimulating() ? "ON" : "OFF"), centerX + 40, y - 6, GuiTextures.GOLD, false);
+        int baseY = this.height - 132;
+        // Live status of everything the screen does, above the date row.
+        Component calendar = Component.translatable("adventcalendar.debug.calendar",
+                state.year(), state.unlockedThrough());
+        graphics.drawCenteredString(this.font, calendar, this.width / 2, baseY - 14, GuiTextures.TEXT_DIM);
+        Component preview = Component.translatable("adventcalendar.debug.preview",
+                state.isPreview() ? "ON" : "OFF");
+        Component simulate = Component.translatable("adventcalendar.debug.simulate",
+                state.isSimulating() ? "ON" : "OFF");
+        graphics.drawString(this.font, preview, 10, baseY - 26, GuiTextures.GOLD, false);
+        graphics.drawString(this.font, simulate, 10, baseY - 14, GuiTextures.GOLD, false);
+        graphics.drawString(this.font, Component.translatable("adventcalendar.debug.hint"),
+                10, baseY + 102, GuiTextures.TEXT_DIM, false);
     }
 
     @Override

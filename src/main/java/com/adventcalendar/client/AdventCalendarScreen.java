@@ -19,19 +19,17 @@ public class AdventCalendarScreen extends AbstractCalendarScreen {
     protected void buildWidgets() {
         int centerX = this.width / 2;
         int buttonY = this.height - 26;
-        int offset = 0;
 
         this.addRenderableWidget(Button.builder(text("adventcalendar.gui.button.close"), button -> this.onClose())
                 .bounds(centerX - 50, buttonY, 100, 20)
                 .build());
-        offset += 104;
 
         if (state.pendingCount() > 0) {
             Component label = text("adventcalendar.gui.button.retrieve", state.pendingCount());
             this.addRenderableWidget(Button.builder(label, button ->
                             ModNetwork.CHANNEL.sendToServer(new CalendarActionPacket(
                                     CalendarActionPacket.RETRIEVE_STOCKING, 0)))
-                    .bounds(centerX + offset - 104 - 60, buttonY, 120, 20)
+                    .bounds(centerX - 50 - 4 - 122, buttonY, 122, 20)
                     .build());
         }
         if (state.isAdmin()) {

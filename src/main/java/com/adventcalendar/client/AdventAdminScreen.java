@@ -175,10 +175,14 @@ public class AdventAdminScreen extends AbstractCalendarScreen {
 
     @Override
     protected void drawHeader(GuiGraphics graphics) {
-        super.drawHeader(graphics);
+        int centerX = this.width / 2;
+        graphics.drawCenteredString(this.font, this.title, centerX, layout.gridY - 36, GuiTextures.GOLD);
         graphics.drawCenteredString(this.font,
                 text("adventcalendar.admin.configured", configuredDays(), state.days()),
-                this.width / 2, layout.gridY - 10, GuiTextures.GREEN);
+                centerX, layout.gridY - 24, GuiTextures.GREEN);
+        graphics.drawCenteredString(this.font, text("adventcalendar.gui.realdate", state.dateString()),
+                centerX, layout.gridY - 12,
+                state.isDateOverridden() ? GuiTextures.RED : GuiTextures.TEXT_DIM);
     }
 
     private int configuredDays() {

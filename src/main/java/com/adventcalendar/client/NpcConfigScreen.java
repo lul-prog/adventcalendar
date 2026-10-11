@@ -214,6 +214,14 @@ public class NpcConfigScreen extends Screen {
         pose.popPose();
     }
 
+
+    /** Keeps the layout in sync when the window is resized (the vanilla hook for that). */
+    @Override
+    protected void repositionElements() {
+        this.clearWidgets();
+        this.init();
+    }
+
     @Override
     public boolean isPauseScreen() {
         return false;
