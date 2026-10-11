@@ -7,9 +7,12 @@ import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-/** Registro del renderer del NPC. Solo existe en el cliente (distmarker). */
+/** Client only setup: registers the NPC renderer. */
 @Mod.EventBusSubscriber(modid = AdventCalendar.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD, value = Dist.CLIENT)
-public class ClientSetup {
+public final class ClientSetup {
+    private ClientSetup() {
+    }
+
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(ModEntities.ADVENT_NPC.get(), AdventNpcRenderer::new);

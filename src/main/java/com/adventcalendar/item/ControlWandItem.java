@@ -2,8 +2,8 @@ package com.adventcalendar.item;
 
 import com.adventcalendar.entity.AdventNpcEntity;
 import com.adventcalendar.network.ModNetwork;
-import com.adventcalendar.network.OpenNpcConfigPacket;
-import net.minecraft.core.BlockPos;
+import com.adventcalendar.network.OpenGuiPacket;
+import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -14,150 +14,136 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.network.PacketDistributor;
 
-import java.util.UUID;
+import javax.annotation.Nullable;
+import java.util.List;
 
 /**
- * Mando de control del NPC de adviento (requiere operador).
- * - Clic derecho a un NPC: lo selecciona (guarda su UUID en el NBT del ítem).
- * - Clic derecho a un bloque: teletransporta el NPC seleccionado encima del bloque.
- * - Shift + clic derecho (al NPC o al aire): abre la interfaz de configuración.
+ * The operator tool of the mod.
+ *
+ * <ul>
+ *     <li>right click an Advent NPC - select it (its UUID is stored in the wand)</li>
+ *     <li>shift + right click - open the NPC configuration GUI</li>
+ *     <li>right click a block - move the selected NPC on top of that block</li>
+ * </ul>
  */
 public class ControlWandItem extends Item {
     private static final String TAG_SELECTED = "SelectedNpc";
+    private static final double SEARCH_RADIUS = 12.0D;
 
     public ControlWandItem() {
         super(new Item.Properties().stacksTo(1));
     }
 
-    @Override
-    public Component getName(ItemStack stack) {
-        return Component.literal("Mando de control");
-    }
-
-    /** Permiso de operador (nivel 2), verificado en el servidor. */
     private static boolean hasOp(Player player) {
-        return player instanceof ServerPlayer sp && sp.hasPermissions(2);
+        return player instanceof ServerPlayer serverPlayer && serverPlayer.hasPermissions(2);
     }
 
-    private static void denyOp(ServerPlayer sp) {
-        sp.displayClientMessage(Component.literal("Necesitas ser operador para usar el mando."), true);
+    private static void denyOp(ServerPlayer player) {
+        player.sendSystemMessage(Component.translatable("adventcalendar.msg.op_required")
+                .withStyle(ChatFormatting.RED));
     }
 
-    /** NPC objetivo: el seleccionado en el mando, o el más cercano en 5 bloques si no hay. */
-    private static AdventNpcEntity findTarget(ServerPlayer sp, ItemStack stack) {
-        ServerLevel level = sp.serverLevel();
+    /** The selected NPC, or the closest one within {@link #SEARCH_RADIUS}. */
+    @Nullable
+    private static AdventNpcEntity findTarget(ServerPlayer player, ItemStack stack) {
+        ServerLevel level = player.serverLevel();
         CompoundTag tag = stack.getTag();
         if (tag != null && tag.hasUUID(TAG_SELECTED)) {
-            UUID uuid = tag.getUUID(TAG_SELECTED);
-            Entity e = level.getEntity(uuid);
-            if (e instanceof AdventNpcEntity npc) {
+            Entity entity = level.getEntity(tag.getUUID(TAG_SELECTED));
+            if (entity instanceof AdventNpcEntity npc) {
                 return npc;
             }
+            tag.remove(TAG_SELECTED);
         }
-        AdventNpcEntity best = null;
-        double bestDist = 5.0;
-        for (AdventNpcEntity npc : level.getEntitiesOfClass(AdventNpcEntity.class,
-                sp.getBoundingBox().inflate(5.0), n -> true)) {
-            double d = npc.distanceTo(sp);
-            if (d < bestDist) {
-                bestDist = d;
-                best = npc;
+        List<AdventNpcEntity> nearby = level.getEntitiesOfClass(AdventNpcEntity.class,
+                player.getBoundingBox().inflate(SEARCH_RADIUS));
+        AdventNpcEntity closest = null;
+        double best = Double.MAX_VALUE;
+        for (AdventNpcEntity npc : nearby) {
+            double distance = npc.distanceToSqr(player);
+            if (distance < best) {
+                best = distance;
+                closest = npc;
             }
         }
-        return best;
+        return closest;
     }
 
-    private static InteractionResult openConfig(ServerPlayer sp, ItemStack stack) {
-        AdventNpcEntity npc = findTarget(sp, stack);
+    private static InteractionResult openConfig(ServerPlayer player, ItemStack stack) {
+        AdventNpcEntity npc = findTarget(player, stack);
         if (npc == null) {
-            sp.displayClientMessage(Component.literal("No hay NPC: selecciona uno con clic derecho o acércate a 5 bloques."), true);
+            player.sendSystemMessage(Component.translatable("adventcalendar.msg.npc_missing")
+                    .withStyle(ChatFormatting.RED));
             return InteractionResult.FAIL;
         }
-        ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
-                new OpenNpcConfigPacket(npc.getId()));
-        return InteractionResult.sidedSuccess(false);
+        ModNetwork.sendTo(player, new OpenGuiPacket(OpenGuiPacket.GUI_NPC_CONFIG, npc.getId()));
+        return InteractionResult.SUCCESS;
     }
 
-    /**
-     * Clic derecho sobre el NPC: con shift abre su configuración, sin shift lo selecciona.
-     */
     @Override
-    public InteractionResult interactLivingEntity(ItemStack stack, Player player, LivingEntity target,
+    public InteractionResult interactLivingEntity(ItemStack stack, Player player, net.minecraft.world.entity.LivingEntity target,
                                                   InteractionHand hand) {
         if (!(target instanceof AdventNpcEntity npc) || hand != InteractionHand.MAIN_HAND) {
             return InteractionResult.PASS;
         }
         if (player.level().isClientSide) {
-            return InteractionResult.sidedSuccess(true);
+            return InteractionResult.SUCCESS;
         }
-        ServerPlayer sp = (ServerPlayer) player;
+        ServerPlayer serverPlayer = (ServerPlayer) player;
         if (!hasOp(player)) {
-            denyOp(sp);
+            denyOp(serverPlayer);
             return InteractionResult.FAIL;
         }
         if (player.isCrouching()) {
-            ModNetwork.CHANNEL.send(PacketDistributor.PLAYER.with(() -> sp),
-                    new OpenNpcConfigPacket(npc.getId()));
+            ModNetwork.sendTo(serverPlayer, new OpenGuiPacket(OpenGuiPacket.GUI_NPC_CONFIG, npc.getId()));
         } else {
             stack.getOrCreateTag().putUUID(TAG_SELECTED, npc.getUUID());
-            sp.displayClientMessage(Component.literal("NPC seleccionado."), true);
+            serverPlayer.sendSystemMessage(Component.translatable("adventcalendar.msg.wand_selected")
+                    .withStyle(ChatFormatting.GREEN));
         }
         return InteractionResult.sidedSuccess(false);
     }
 
-    /**
-     * Clic derecho a un bloque: con shift abre la configuración;
-     * sin shift teletransporta el NPC seleccionado encima del bloque.
-     */
     @Override
-    public InteractionResult useOn(UseOnContext ctx) {
-        Player player = ctx.getPlayer();
-        if (player == null || ctx.getHand() != InteractionHand.MAIN_HAND) {
+    public InteractionResult useOn(UseOnContext context) {
+        Player player = context.getPlayer();
+        if (player == null || context.getHand() != InteractionHand.MAIN_HAND) {
             return InteractionResult.PASS;
         }
-        if (ctx.getLevel().isClientSide) {
-            return InteractionResult.sidedSuccess(true);
+        if (context.getLevel().isClientSide) {
+            return InteractionResult.SUCCESS;
         }
-        ServerPlayer sp = (ServerPlayer) player;
+        ServerPlayer serverPlayer = (ServerPlayer) player;
         if (!hasOp(player)) {
-            denyOp(sp);
+            denyOp(serverPlayer);
             return InteractionResult.FAIL;
         }
         if (player.isCrouching()) {
-            return openConfig(sp, ctx.getItemInHand());
+            return openConfig(serverPlayer, context.getItemInHand());
         }
-        ItemStack stack = ctx.getItemInHand();
-        CompoundTag tag = stack.getTag();
-        if (tag == null || !tag.hasUUID(TAG_SELECTED)) {
-            sp.displayClientMessage(Component.literal("Primero selecciona un NPC con clic derecho."), true);
+        AdventNpcEntity npc = findTarget(serverPlayer, context.getItemInHand());
+        if (npc == null) {
+            serverPlayer.sendSystemMessage(Component.translatable("adventcalendar.msg.wand_no_selection")
+                    .withStyle(ChatFormatting.RED));
             return InteractionResult.FAIL;
         }
-        ServerLevel level = sp.serverLevel();
-        Entity e = level.getEntity(tag.getUUID(TAG_SELECTED));
-        if (!(e instanceof AdventNpcEntity npc)) {
-            tag.remove(TAG_SELECTED);
-            sp.displayClientMessage(Component.literal("El NPC seleccionado ya no existe."), true);
-            return InteractionResult.FAIL;
-        }
-        BlockPos pos = ctx.getClickedPos();
-        npc.moveTo(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5, npc.getYRot(), npc.getXRot());
-        level.playSound(null, npc.getX(), npc.getY(), npc.getZ(),
+        net.minecraft.core.BlockPos pos = context.getClickedPos().above();
+        npc.moveTo(pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D, npc.getYRot(), npc.getXRot());
+        npc.snapRotation(npc.getYRot(), 0.0F);
+        context.getLevel().playSound(null, npc.getX(), npc.getY(), npc.getZ(),
                 SoundEvents.ENDERMAN_TELEPORT, SoundSource.PLAYERS, 1.0F, 1.0F);
+        serverPlayer.sendSystemMessage(Component.translatable("adventcalendar.msg.wand_moved")
+                .withStyle(ChatFormatting.GREEN));
         return InteractionResult.sidedSuccess(false);
     }
 
-    /**
-     * Shift + clic derecho al aire: abre la configuración del NPC seleccionado
-     * (o del más cercano en 5 bloques).
-     */
     @Override
     public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
         ItemStack stack = player.getItemInHand(hand);
@@ -165,16 +151,24 @@ public class ControlWandItem extends Item {
             return InteractionResultHolder.pass(stack);
         }
         if (level.isClientSide) {
-            return InteractionResultHolder.sidedSuccess(stack, true);
+            return InteractionResultHolder.success(stack);
         }
-        ServerPlayer sp = (ServerPlayer) player;
+        ServerPlayer serverPlayer = (ServerPlayer) player;
         if (!hasOp(player)) {
-            denyOp(sp);
+            denyOp(serverPlayer);
             return InteractionResultHolder.fail(stack);
         }
-        InteractionResult r = openConfig(sp, stack);
-        return r.consumesAction()
-                ? InteractionResultHolder.sidedSuccess(stack, false)
+        InteractionResult result = openConfig(serverPlayer, stack);
+        return result == InteractionResult.SUCCESS
+                ? InteractionResultHolder.success(stack)
                 : InteractionResultHolder.fail(stack);
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, @Nullable Level level, List<Component> tooltip, TooltipFlag flag) {
+        tooltip.add(Component.translatable("item.adventcalendar.control_wand.tooltip1")
+                .withStyle(ChatFormatting.GRAY));
+        tooltip.add(Component.translatable("item.adventcalendar.control_wand.tooltip2")
+                .withStyle(ChatFormatting.DARK_GRAY));
     }
 }

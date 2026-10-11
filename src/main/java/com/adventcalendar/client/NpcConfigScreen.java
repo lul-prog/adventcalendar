@@ -3,20 +3,23 @@ package com.adventcalendar.client;
 import com.adventcalendar.entity.AdventNpcEntity;
 import com.adventcalendar.network.ModNetwork;
 import com.adventcalendar.network.NpcConfigPacket;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Interfaz de configuración del NPC (mando de control, shift + clic derecho).
- * Nombre, color del nombre, brillo, partículas ambientales, inmortal y skin.
- * Los cambios se envían al servidor con "Guardar".
+ * Configuration GUI of one Advent NPC (opened with the control wand, the debug GUI or
+ * {@code /advent npc}). Everything - name, colour, skin (URL, username or
+ * {@code local:file.png}), skin model, glow, particles, invulnerability, looking at players
+ * and the ambient sound - is sent to the server on save.
  */
 public class NpcConfigScreen extends Screen {
     private static final ChatFormatting[] COLORS = {
@@ -30,93 +33,116 @@ public class NpcConfigScreen extends Screen {
 
     private final int entityId;
     private final String initialName;
-    private final String initialSkin;
     private ChatFormatting color;
     private boolean glow;
     private boolean particles;
     private boolean invulnerable;
+    private boolean lookAtPlayers;
+    private boolean ambientSound;
+    private AdventNpcEntity.SkinModel skinModel;
 
     private EditBox nameBox;
     private EditBox skinBox;
-    private Button glowBtn;
-    private Button particlesBtn;
-    private Button invulnBtn;
+    private Button modelButton;
+    private Button glowButton;
+    private Button particlesButton;
+    private Button invulnerableButton;
+    private Button lookButton;
+    private Button ambientButton;
     private final List<ColorButton> colorButtons = new ArrayList<>();
 
+    private int panelLeft;
+    private int panelTop;
+
     public NpcConfigScreen(AdventNpcEntity npc) {
-        super(Component.literal("Configurar NPC"));
+        super(Component.translatable("adventcalendar.npc.title"));
         this.entityId = npc.getId();
-        Component cn = npc.getCustomName();
-        this.initialName = cn == null ? "" : cn.getString();
-        this.initialSkin = npc.getSkin();
-        this.color = parseColor(npc.getNameColor());
+        Component customName = npc.getCustomName();
+        this.initialName = customName == null ? "" : customName.getString();
+        this.color = AdventNpcEntity.parseColor(npc.getNameColor());
         this.glow = npc.getGlow();
         this.particles = npc.getAmbientParticles();
         this.invulnerable = npc.getInvulnerableSync();
+        this.lookAtPlayers = npc.getLookAtPlayers();
+        this.ambientSound = npc.isAmbientSoundEnabled();
+        this.skinModel = npc.getSkinModel();
     }
 
-    private static ChatFormatting parseColor(String name) {
-        if (name == null || name.isEmpty()) {
-            return ChatFormatting.WHITE;
-        }
-        try {
-            ChatFormatting f = ChatFormatting.valueOf(name);
-            return f.isColor() ? f : ChatFormatting.WHITE;
-        } catch (IllegalArgumentException e) {
-            return ChatFormatting.WHITE;
-        }
-    }
-
-    private static Component toggleText(String label, boolean value) {
-        return Component.literal(label + ": " + (value ? "Sí" : "No"));
+    private Component onOff(String key, boolean value) {
+        return Component.translatable(key, value ? "ON" : "OFF");
     }
 
     @Override
     protected void init() {
-        int cx = this.width / 2;
+        int centerX = this.width / 2;
+        this.panelLeft = centerX - 130;
+        this.panelTop = Math.max(2, this.height / 2 - 112);
 
-        // Nombre
-        this.nameBox = new EditBox(this.font, cx - 100, 40, 200, 20, Component.literal("Nombre"));
+        this.nameBox = new EditBox(this.font, centerX - 95, panelTop + 32, 190, 18,
+                Component.translatable("adventcalendar.npc.name"));
         this.nameBox.setMaxLength(32);
         this.nameBox.setValue(initialName);
         this.addRenderableWidget(this.nameBox);
 
-        // Color del nombre: 2 filas de 8
         colorButtons.clear();
         for (int i = 0; i < COLORS.length; i++) {
-            int bx = cx - 100 + (i % 8) * 25;
-            int by = 76 + (i / 8) * 22;
-            ColorButton b = new ColorButton(bx, by, COLORS[i]);
-            colorButtons.add(b);
-            this.addRenderableWidget(b);
+            ColorButton button = new ColorButton(centerX - 112 + i * 14, panelTop + 66, COLORS[i]);
+            colorButtons.add(button);
+            this.addRenderableWidget(button);
         }
 
-        // Toggles
-        this.glowBtn = this.addRenderableWidget(Button.builder(toggleText("Brillo", glow), b -> {
-            glow = !glow;
-            b.setMessage(toggleText("Brillo", glow));
-        }).bounds(cx - 150, 130, 96, 20).build());
-        this.particlesBtn = this.addRenderableWidget(Button.builder(toggleText("Partículas", particles), b -> {
-            particles = !particles;
-            b.setMessage(toggleText("Partículas", particles));
-        }).bounds(cx - 48, 130, 96, 20).build());
-        this.invulnBtn = this.addRenderableWidget(Button.builder(toggleText("Inmortal", invulnerable), b -> {
-            invulnerable = !invulnerable;
-            b.setMessage(toggleText("Inmortal", invulnerable));
-        }).bounds(cx + 54, 130, 96, 20).build());
+        this.modelButton = this.addRenderableWidget(Button.builder(
+                        Component.translatable("adventcalendar.npc.model", skinModel.name()), button -> {
+                            skinModel = skinModel.next();
+                            button.setMessage(Component.translatable("adventcalendar.npc.model", skinModel.name()));
+                        })
+                .bounds(centerX - 124, panelTop + 86, 122, 18).build());
 
-        // Skin
-        this.skinBox = new EditBox(this.font, cx - 100, 166, 200, 20,
-                Component.literal("Skin (URL o usuario)"));
+        this.glowButton = this.addRenderableWidget(Button.builder(onOff("adventcalendar.npc.glow", glow), button -> {
+            glow = !glow;
+            button.setMessage(onOff("adventcalendar.npc.glow", glow));
+        }).bounds(centerX + 2, panelTop + 86, 122, 18).build());
+
+        this.particlesButton = this.addRenderableWidget(
+                Button.builder(onOff("adventcalendar.npc.particles", particles), button -> {
+                    particles = !particles;
+                    button.setMessage(onOff("adventcalendar.npc.particles", particles));
+                }).bounds(centerX - 124, panelTop + 106, 122, 18).build());
+
+        this.invulnerableButton = this.addRenderableWidget(
+                Button.builder(onOff("adventcalendar.npc.invulnerable", invulnerable), button -> {
+                    invulnerable = !invulnerable;
+                    button.setMessage(onOff("adventcalendar.npc.invulnerable", invulnerable));
+                }).bounds(centerX + 2, panelTop + 106, 122, 18).build());
+
+        this.lookButton = this.addRenderableWidget(Button.builder(onOff("adventcalendar.npc.look", lookAtPlayers),
+                button -> {
+                    lookAtPlayers = !lookAtPlayers;
+                    button.setMessage(onOff("adventcalendar.npc.look", lookAtPlayers));
+                }).bounds(centerX - 124, panelTop + 126, 122, 18).build());
+
+        this.ambientButton = this.addRenderableWidget(
+                Button.builder(onOff("adventcalendar.npc.ambient", ambientSound), button -> {
+                    ambientSound = !ambientSound;
+                    button.setMessage(onOff("adventcalendar.npc.ambient", ambientSound));
+                }).bounds(centerX + 2, panelTop + 126, 122, 18).build());
+
+        this.skinBox = new EditBox(this.font, centerX - 95, panelTop + 158, 190, 18,
+                Component.translatable("adventcalendar.npc.skin"));
         this.skinBox.setMaxLength(256);
-        this.skinBox.setValue(initialSkin);
         this.addRenderableWidget(this.skinBox);
 
-        // Guardar / Cancelar
-        this.addRenderableWidget(Button.builder(Component.literal("Guardar"), b -> saveAndClose())
-                .bounds(cx - 104, 198, 100, 20).build());
-        this.addRenderableWidget(Button.builder(Component.literal("Cancelar"), b -> this.onClose())
-                .bounds(cx + 4, 198, 100, 20).build());
+        this.addRenderableWidget(Button.builder(Component.translatable("adventcalendar.npc.preview"),
+                        button -> SkinManager.invalidate(skinBox.getValue().trim()))
+                .bounds(centerX - 124, panelTop + 180, 122, 18).build());
+
+        this.addRenderableWidget(Button.builder(Component.translatable("adventcalendar.npc.save"),
+                        button -> saveAndClose())
+                .bounds(centerX - 124, panelTop + 204, 122, 20).build());
+
+        this.addRenderableWidget(Button.builder(Component.translatable("adventcalendar.npc.cancel"),
+                        button -> this.onClose())
+                .bounds(centerX + 2, panelTop + 204, 122, 20).build());
     }
 
     private void saveAndClose() {
@@ -125,19 +151,67 @@ public class NpcConfigScreen extends Screen {
                 nameBox.getValue().trim(),
                 color.name(),
                 glow, particles, invulnerable,
-                skinBox.getValue().trim()));
+                skinBox.getValue().trim(),
+                skinModel.name(),
+                lookAtPlayers, ambientSound));
         this.onClose();
     }
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
-        this.renderBackground(g);
-        super.render(g, mouseX, mouseY, partial);
-        int cx = this.width / 2;
-        g.drawCenteredString(this.font, this.title, cx, 18, 0xFFFFFF);
-        g.drawString(this.font, "Nombre:", cx - 100, 30, 0xA0A0A0);
-        g.drawString(this.font, "Color del nombre:", cx - 100, 66, 0xA0A0A0);
-        g.drawString(this.font, "Skin (URL o usuario):", cx - 100, 156, 0xA0A0A0);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(graphics);
+        int centerX = this.width / 2;
+
+        GuiTextures.drawPanel(graphics, panelLeft, panelTop, 260, 230);
+        graphics.drawCenteredString(this.font, this.title, centerX - 20, panelTop + 10, GuiTextures.GOLD);
+        graphics.drawString(this.font, Component.translatable("adventcalendar.npc.name"),
+                centerX - 95, panelTop + 22, GuiTextures.TEXT_DIM, false);
+        graphics.drawString(this.font, Component.translatable("adventcalendar.npc.color"),
+                centerX - 112, panelTop + 56, GuiTextures.TEXT_DIM, false);
+        graphics.drawString(this.font, Component.translatable("adventcalendar.npc.skin"),
+                centerX - 95, panelTop + 148, GuiTextures.TEXT_DIM, false);
+        graphics.drawString(this.font, skinStateText(), centerX - 124, panelTop + 182,
+                stateColour(), false);
+
+        drawSkinPreview(graphics, centerX + 108, panelTop + 12);
+
+        super.render(graphics, mouseX, mouseY, partialTick);
+    }
+
+    private Component skinStateText() {
+        String skin = skinBox == null ? "" : skinBox.getValue().trim();
+        return switch (SkinManager.stateOf(skin)) {
+            case EMPTY -> Component.empty();
+            case DISABLED -> Component.translatable("adventcalendar.npc.skin.offline");
+            case FAILED -> Component.translatable("adventcalendar.npc.skin.failed");
+            case READY -> Component.translatable("adventcalendar.npc.skin.ready");
+            case LOADING -> Component.translatable("adventcalendar.npc.skin.processing");
+            default -> Component.translatable("adventcalendar.npc.skin.loading");
+        };
+    }
+
+    private int stateColour() {
+        return switch (SkinManager.stateOf(skinBox == null ? "" : skinBox.getValue().trim())) {
+            case READY -> GuiTextures.GREEN;
+            case FAILED, DISABLED -> GuiTextures.RED;
+            default -> GuiTextures.TEXT_DIM;
+        };
+    }
+
+    /** 4x scaled face (and hat layer) of the configured skin. */
+    private void drawSkinPreview(GuiGraphics graphics, int x, int y) {
+        ResourceLocation texture = SkinManager.textureFor(skinBox == null ? "" : skinBox.getValue().trim());
+        GuiTextures.drawSlot(graphics, x - 2, y - 2, 36);
+        if (texture == null) {
+            return;
+        }
+        PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(x, y, 0.0F);
+        pose.scale(4.0F, 4.0F, 1.0F);
+        graphics.blit(texture, 0, 0, 8, 8, 8, 8);
+        graphics.blit(texture, 0, 0, 40, 8, 8, 8);
+        pose.popPose();
     }
 
     @Override
@@ -145,23 +219,23 @@ public class NpcConfigScreen extends Screen {
         return false;
     }
 
-    /** Botón de color: muestra el color y un borde blanco si está seleccionado. */
+    /** Colour swatch; a white outline marks the active one. */
     private class ColorButton extends Button {
-        private final ChatFormatting cf;
+        private final ChatFormatting formatting;
 
-        ColorButton(int x, int y, ChatFormatting cf) {
-            super(x, y, 20, 20, Component.empty(), b -> color = cf, Button.DEFAULT_NARRATION);
-            this.cf = cf;
+        ColorButton(int x, int y, ChatFormatting formatting) {
+            super(x, y, 12, 12, Component.empty(), button -> color = formatting, Button.DEFAULT_NARRATION);
+            this.formatting = formatting;
         }
 
         @Override
-        public void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partial) {
-            int rgb = cf.getColor() == null ? 0xFFFFFF : cf.getColor();
-            int x = this.getX();
-            int y = this.getY();
-            g.fill(x, y, x + this.width, y + this.height, 0xFF000000 | rgb);
-            int border = (color == cf) ? 0xFFFFFFFF : 0xFF707070;
-            g.renderOutline(x, y, this.width, this.height, border);
+        public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            Integer rgb = formatting.getColor();
+            int value = rgb == null ? 0xFFFFFF : rgb;
+            graphics.fill(this.getX(), this.getY(), this.getX() + this.width, this.getY() + this.height,
+                    0xFF000000 | value);
+            graphics.renderOutline(this.getX(), this.getY(), this.width, this.height,
+                    color == formatting ? 0xFFFFFFFF : 0xFF404850);
         }
     }
 }

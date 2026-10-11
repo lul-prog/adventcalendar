@@ -2,12 +2,14 @@ package com.adventcalendar.network;
 
 import com.adventcalendar.AdventCalendar;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.simple.SimpleChannel;
 
-/** Canal de red del mod (API de Forge 1.20.1). */
-public class ModNetwork {
-    private static final String PROTOCOL = "1";
+/** The mod's network channel and the small send helpers used all over the code. */
+public final class ModNetwork {
+    private static final String PROTOCOL = "2";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.ChannelBuilder
             .named(new ResourceLocation(AdventCalendar.MOD_ID, "main"))
@@ -16,15 +18,34 @@ public class ModNetwork {
             .serverAcceptedVersions(PROTOCOL::equals)
             .simpleChannel();
 
+    private ModNetwork() {
+    }
+
     public static void register() {
         int id = 0;
-        CHANNEL.registerMessage(id++, ClaimDayPacket.class,
-                ClaimDayPacket::encode, ClaimDayPacket::decode, ClaimDayPacket::handle);
-        CHANNEL.registerMessage(id++, OpenCalendarPacket.class,
-                OpenCalendarPacket::encode, OpenCalendarPacket::decode, OpenCalendarPacket::handle);
+        // server -> client
+        CHANNEL.registerMessage(id++, CalendarSyncPacket.class,
+                CalendarSyncPacket::encode, CalendarSyncPacket::decode, CalendarSyncPacket::handle);
+        CHANNEL.registerMessage(id++, ClaimFeedbackPacket.class,
+                ClaimFeedbackPacket::encode, ClaimFeedbackPacket::decode, ClaimFeedbackPacket::handle);
+        CHANNEL.registerMessage(id++, OpenGuiPacket.class,
+                OpenGuiPacket::encode, OpenGuiPacket::decode, OpenGuiPacket::handle);
+        // client -> server
+        CHANNEL.registerMessage(id++, CalendarActionPacket.class,
+                CalendarActionPacket::encode, CalendarActionPacket::decode, CalendarActionPacket::handle);
+        CHANNEL.registerMessage(id++, AdminEditPacket.class,
+                AdminEditPacket::encode, AdminEditPacket::decode, AdminEditPacket::handle);
+        CHANNEL.registerMessage(id++, DebugActionPacket.class,
+                DebugActionPacket::encode, DebugActionPacket::decode, DebugActionPacket::handle);
         CHANNEL.registerMessage(id++, NpcConfigPacket.class,
                 NpcConfigPacket::encode, NpcConfigPacket::decode, NpcConfigPacket::handle);
-        CHANNEL.registerMessage(id++, OpenNpcConfigPacket.class,
-                OpenNpcConfigPacket::encode, OpenNpcConfigPacket::decode, OpenNpcConfigPacket::handle);
+    }
+
+    public static <MSG> void sendTo(ServerPlayer player, MSG message) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), message);
+    }
+
+    public static <MSG> void sendToAll(MSG message) {
+        CHANNEL.send(PacketDistributor.ALL.noArg(), message);
     }
 }
