@@ -1,6 +1,7 @@
 package com.adventcalendar.util;
 
 import com.adventcalendar.AdventCalendar;
+import com.adventcalendar.AdventConfig;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;

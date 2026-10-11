@@ -374,6 +374,21 @@ def has_field(fqn, field):
     return False
 
 
+JAVA_LANG_TYPES = {
+    "System", "Math", "String", "Double", "Float", "Integer", "Long", "Short", "Byte",
+    "Boolean", "Character", "Object", "Class", "Enum", "Record", "Void", "Thread",
+    "Runnable", "Iterable", "Comparable", "Number", "Exception", "RuntimeException",
+    "Error", "Throwable", "StringBuilder", "StringBuffer", "CharSequence", "StringJoiner",
+    "IllegalArgumentException", "IllegalStateException", "UnsupportedOperationException",
+    "NumberFormatException", "NullPointerException", "IndexOutOfBoundsException",
+    "ArithmeticException", "ClassCastException", "ReflectiveOperationException",
+    "Override", "Deprecated", "SuppressWarnings", "SafeVarargs", "FunctionalInterface",
+    "ProcessHandle", "StackTraceElement", "ThreadLocal", "Runtime", "Package", "Module",
+    "AutoCloseable", "Cloneable", "Appendable", "Readable", "VerifyError", "AssertionError",
+    "InterruptedException", "InstantiationException", "NoSuchMethodException",
+    "NoSuchFieldException", "OutOfMemoryError", "StackOverflowError", "SecurityException",
+}
+
 UNIVERSAL_METHODS = {"toString", "equals", "hashCode", "getClass", "clone", "notify",
                      "notifyAll", "wait", "finalize", "name", "ordinal", "values", "valueOf",
                      "compareTo", "getDeclaringClass", "describeConstable", "registerNatives"}
@@ -476,6 +491,7 @@ class Checker:
             if node.type == "method_declaration":
                 self.check_override(node)
                 self.check_accidental_override(node)
+                self.check_method_captures(node)
             params = node.child_by_field_name("parameters")
             if params is not None:
                 for child in params.children:
@@ -511,6 +527,7 @@ class Checker:
                         name_node = declarator.child_by_field_name("name")
                         if name_node is not None:
                             scope[self.text(name_node)] = type_name
+            self.check_assignment_compatibility(node, scope)
 
         if node.type == "class_declaration":
             for child in node.children:
@@ -523,8 +540,14 @@ class Checker:
 
         if node.type == "method_invocation":
             self.check_invocation(node, scope)
+            object_node = node.child_by_field_name("object")
+            if object_node is not None and object_node.type == "identifier":
+                self.check_type_visibility(object_node, scope)
         elif node.type == "object_creation_expression":
             self.check_creation(node, scope)
+            type_node = node.child_by_field_name("type")
+            if type_node is not None and type_node.type == "type_identifier":
+                self.check_type_visibility(type_node, scope)
         elif node.type == "field_access":
             self.check_field_access(node, scope)
         elif node.type == "marker_annotation" or node.type == "annotation":
@@ -534,6 +557,128 @@ class Checker:
             self.walk(child, scope)
 
     # ---- @Override verification
+    # ---- "must be final or effectively final" (lambdas capturing reassigned locals)
+    def check_method_captures(self, node):
+        body = node.child_by_field_name("body")
+        if body is None:
+            return
+        self.analyse_captures(body, node.child_by_field_name("parameters"), initial={})
+        # lambdas are their own scope: analyse each of them separately as well
+        for lambda_node in self.find_lambdas(body):
+            parameters = lambda_node.child_by_field_name("parameters")
+            lambda_body = lambda_node.child_by_field_name("body")
+            if lambda_body is not None:
+                self.analyse_captures(lambda_body, parameters, initial={}, owner=lambda_node)
+
+    def analyse_captures(self, body, params, initial, owner=None):
+        declarations = dict(initial)   # name -> [assignments, is_param]
+        if params is not None:
+            for child in params.children:
+                if child.type in ("formal_parameter", "spread_parameter"):
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        declarations[self.text(name_node)] = [0, True]
+                elif child.type == "identifier":       # single lambda parameter
+                    declarations[self.text(child)] = [0, True]
+        self.collect_assignments(body, declarations)
+        for lambda_node in self.find_lambdas(body):
+            inner = set()
+            parameters = lambda_node.child_by_field_name("parameters")
+            if parameters is not None:
+                for child in parameters.children:
+                    if child.type == "identifier":
+                        inner.add(self.text(child))
+                    elif child.type in ("formal_parameter", "spread_parameter"):
+                        name_node = child.child_by_field_name("name")
+                        if name_node is not None:
+                            inner.add(self.text(name_node))
+            self.collect_declared_names(lambda_node.child_by_field_name("body"), inner)
+            used = set()
+            self.collect_identifiers(lambda_node, used)
+            for name in sorted(used - inner):
+                entry = declarations.get(name)
+                if entry is None:
+                    continue
+                assignments, is_param = entry
+                limit = 0 if is_param else 1
+                if assignments > limit:
+                    self.error(lambda_node, f"`{name}` is reassigned and therefore cannot be "
+                                            f"used inside a lambda (must be final or effectively final)")
+
+    def collect_assignments(self, node, declarations):
+        if node.type in ("class_declaration", "interface_declaration", "enum_declaration",
+                         "record_declaration", "lambda_expression"):
+            return
+        if node.type == "local_variable_declaration":
+            has_initializer = any(child.type == "variable_declarator"
+                                  and child.child_by_field_name("value") is not None
+                                  for child in node.children)
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        name = self.text(name_node)
+                        current = declarations.get(name)
+                        if current is None:
+                            declarations[name] = [1 if has_initializer else 0, False]
+                        else:
+                            current[0] += 1 if has_initializer else 0
+        elif node.type == "assignment_expression":
+            left = node.child_by_field_name("left")
+            if left is not None and left.type == "identifier":
+                name = self.text(left)
+                if name in declarations:
+                    declarations[name][0] += 1
+        elif node.type == "update_expression":
+            # tree-sitter-java exposes no fields here: `++x`, `x++`, `x--`
+            for child in node.children:
+                if child.type == "identifier":
+                    name = self.text(child)
+                    if name in declarations:
+                        declarations[name][0] += 1
+                    break
+        for child in node.children:
+            self.collect_assignments(child, declarations)
+
+    def find_lambdas(self, node, found=None):
+        if found is None:
+            found = []
+        if node.type == "lambda_expression":
+            found.append(node)
+            return found
+        if node.type in ("class_declaration", "interface_declaration", "enum_declaration",
+                         "record_declaration"):
+            return found
+        for child in node.children:
+            self.find_lambdas(child, found)
+        return found
+
+    def collect_declared_names(self, node, names):
+        if node is None:
+            return
+        if node.type in ("class_declaration", "interface_declaration", "enum_declaration"):
+            return
+        if node.type == "local_variable_declaration":
+            for child in node.children:
+                if child.type == "variable_declarator":
+                    name_node = child.child_by_field_name("name")
+                    if name_node is not None:
+                        names.add(self.text(name_node))
+        if node.type == "lambda_expression":
+            parameters = node.child_by_field_name("parameters")
+            if parameters is not None:
+                for child in parameters.children:
+                    if child.type == "identifier":
+                        names.add(self.text(child))
+        for child in node.children:
+            self.collect_declared_names(child, names)
+
+    def collect_identifiers(self, node, names):
+        if node.type == "identifier":
+            names.add(self.text(node))
+        for child in node.children:
+            self.collect_identifiers(child, names)
+
     def check_override(self, node):
         if self.current_type is None:
             return
@@ -653,7 +798,12 @@ class Checker:
                 }
                 if method in guesses and guesses[method]:
                     return guesses[method], "chain"
-                owner = self.receiver_type(object_node.child_by_field_name("object"), scope)[0]
+                inner_object = object_node.child_by_field_name("object")
+                owner = None
+                if inner_object is None:
+                    owner = self.current_type.fqn if self.current_type is not None else None
+                else:
+                    owner = self.receiver_type(inner_object, scope)[0]
                 if owner:
                     found = self.find_return_type(owner, method)
                     if found:
@@ -702,6 +852,20 @@ class Checker:
         arity = count_args(args)
         object_node = node.child_by_field_name("object")
         if object_node is None:
+            # implicit `this`: must exist in the enclosing type (or in java.lang/Object)
+            if self.current_type is None or method in UNIVERSAL_METHODS:
+                return
+            declared = False
+            for candidate in ordered_supertypes(self.current_type.fqn):
+                info = CLASSES.get(candidate)
+                if info and method in info.methods:
+                    declared = True
+                    arities = info.methods[method]
+                    if -1 in arities or arity in arities:
+                        return
+            if declared:
+                self.error(node, f"no overload of `{method}` takes {arity} argument(s) "
+                                 f"in {self.current_type.fqn}")
             return
         type_name, kind = self.receiver_type(object_node, scope)
         if kind == "super":
@@ -735,6 +899,69 @@ class Checker:
         if ok is False:
             self.error(node, f"no constructor of {fqn} takes {arity} argument(s)")
 
+    def infer_expression_type(self, expr, scope):
+        """Best effort static type of an expression, or None when unsure."""
+        if expr.type == "object_creation_expression":
+            type_node = expr.child_by_field_name("type")
+            return clean_type(self.text(type_node)) if type_node is not None else None
+        if expr.type == "cast_expression":
+            type_node = expr.child_by_field_name("type")
+            return clean_type(self.text(type_node)) if type_node is not None else None
+        if expr.type in ("method_invocation", "field_access", "identifier"):
+            if expr.type == "identifier":
+                return scope.get(self.text(expr))
+            return self.receiver_type(expr, scope)[0]
+        return None
+
+    def check_assignment_compatibility(self, node, scope):
+        if node.type != "local_variable_declaration":
+            return
+        type_node = node.child_by_field_name("type")
+        declared = clean_type(self.text(type_node)) if type_node is not None else None
+        if declared is None or declared in ("var",):
+            return
+        for declarator in node.children:
+            if declarator.type != "variable_declarator":
+                continue
+            value = declarator.child_by_field_name("value")
+            if value is None:
+                continue
+            inferred = self.infer_expression_type(value, scope)
+            if not inferred:
+                continue
+            declared_fqn = self.unit.resolve(declared) or declared
+            inferred_fqn = self.unit.resolve(inferred) or inferred
+            if declared_fqn not in CLASSES or inferred_fqn not in CLASSES:
+                continue
+            if declared_fqn == inferred_fqn:
+                continue
+            if declared_fqn in ordered_supertypes(inferred_fqn):
+                continue
+            if inferred_fqn in ordered_supertypes(declared_fqn):
+                continue   # downcast: fine without a cast in some cases? report instead
+            self.error(declarator, f"cannot assign {inferred_fqn} to {declared_fqn}")
+
+    def check_type_visibility(self, node, scope):
+        """`Foo.bar` / `new Foo(...)` / `Foo.method(...)` where Foo is a type that exists
+        somewhere in the index but is not reachable from this file (missing import)."""
+        if node.type == "identifier":
+            name = self.text(node)
+            if name in scope or name in KEYWORDS:
+                return
+            if not name[:1].isupper():
+                return
+            if name in self.unit.types or name in self.unit.imports:
+                return
+            if self.unit.resolve(name) is not None:
+                return
+            # Only flag top level matches: a nested class (Outer$Inner) or a java.lang class
+            # with the same simple name is a coincidence, not a missing import.
+            candidates = [candidate for candidate in SIMPLE_INDEX[name] if "$" not in candidate]
+            if not candidates or name in JAVA_LANG_TYPES:
+                return
+            self.error(node, f"type `{name}` is not visible here (missing import?). "
+                             f"Known types with that name: {', '.join(sorted(candidates)[:3])}")
+
     def check_field_access(self, node, scope):
         object_node = node.child_by_field_name("object")
         field_node = node.child_by_field_name("field")
@@ -747,6 +974,7 @@ class Checker:
             return
         fqn = self.unit.resolve(name)
         if fqn is None or fqn not in CLASSES:
+            self.check_type_visibility(object_node, scope)
             return
         field = self.text(field_node)
         info = CLASSES[fqn]

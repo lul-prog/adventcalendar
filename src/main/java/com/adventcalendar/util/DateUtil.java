@@ -4,14 +4,13 @@ import com.adventcalendar.AdventConfig;
 
 import javax.annotation.Nullable;
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 
 /**
  * Real-world clock of the server plus the optional debug override.
  *
  * <p>The whole mod works off the <b>real calendar date</b> of the machine running the
  * server: day {@code N} of the Advent Calendar unlocks when the real date reaches
- * December {@code N}. When {@link ModConfig#DECEMBER_ONLY} is disabled the calendar
+ * December {@code N}. When {@link AdventConfig#DECEMBER_ONLY} is disabled the calendar
  * behaves like a monthly calendar instead (day {@code N} unlocks on the {@code N}-th of
  * any month), which is handy for testing outside December.</p>
  *
@@ -132,7 +131,7 @@ public final class DateUtil {
                         Math.min(day, LocalDate.of(today.getYear(), month, 1).lengthOfMonth()));
                 return candidate;
             }
-        } catch (NumberFormatException | DateTimeParseException | java.time.DateTimeException ignored) {
+        } catch (NumberFormatException | java.time.DateTimeException ignored) {
             // fall through and report failure
         }
         return null;

@@ -10,6 +10,7 @@ import com.adventcalendar.entity.AdventNpcEntity;
 import com.adventcalendar.util.DateUtil;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.ItemStack;
 
@@ -21,7 +22,8 @@ public final class ServerPacketHandler {
     private ServerPacketHandler() {
     }
 
-    private static Component msg(String key, Object... args) {
+    /** {@link MutableComponent} on purpose: only that interface offers withStyle/append. */
+    private static MutableComponent msg(String key, Object... args) {
         return Component.translatable(key, args);
     }
 
