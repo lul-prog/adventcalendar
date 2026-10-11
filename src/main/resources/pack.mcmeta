@@ -1,1 +1,6 @@
-{"pack":{"description":"Advent Calendar","pack_format":15}}
+{
+  "pack": {
+    "description": "Advent Calendar",
+    "pack_format": 15
+  }
+}

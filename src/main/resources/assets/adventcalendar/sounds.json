@@ -1,0 +1,46 @@
+{
+  "lock": {
+    "category": "player",
+    "subtitle": "subtitles.adventcalendar.lock",
+    "sounds": [
+      {
+        "name": "adventcalendar:lock",
+        "stream": false,
+        "attenuation_distance": 16
+      }
+    ]
+  },
+  "unlock": {
+    "category": "player",
+    "subtitle": "subtitles.adventcalendar.unlock",
+    "sounds": [
+      {
+        "name": "adventcalendar:unlock",
+        "stream": false,
+        "attenuation_distance": 16
+      }
+    ]
+  },
+  "claim": {
+    "category": "player",
+    "subtitle": "subtitles.adventcalendar.claim",
+    "sounds": [
+      {
+        "name": "adventcalendar:claim",
+        "stream": false,
+        "attenuation_distance": 16
+      }
+    ]
+  },
+  "notify": {
+    "category": "player",
+    "subtitle": "subtitles.adventcalendar.notify",
+    "sounds": [
+      {
+        "name": "adventcalendar:notify",
+        "stream": false,
+        "attenuation_distance": 16
+      }
+    ]
+  }
+}
