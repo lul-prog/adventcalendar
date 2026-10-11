@@ -1,0 +1,18 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IntelliJ IDEA
+.idea/
+
+# Minecraft run client/server
+run/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+*.log.gz
